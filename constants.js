@@ -17,10 +17,8 @@ export const ID_SETTINGS_CONTAINER = `${EXTENSION_NAME}-settings`;
 export const ID_SETTINGS_ENABLED_DROPDOWN = `${EXTENSION_NAME}-enabled`;
 export const ID_ICON_TYPE_DROPDOWN = `${EXTENSION_NAME}-icon-type`;
 export const ID_CUSTOM_ICON_URL = `${EXTENSION_NAME}-custom-icon-url`;
-// --- 新增ID ---
 export const ID_CUSTOM_ICON_SIZE_INPUT = `${EXTENSION_NAME}-custom-icon-size`;
 export const ID_FA_ICON_CODE_INPUT = `${EXTENSION_NAME}-fa-icon-code`;
-// --- 结束新增 ---
 export const ID_COLOR_MATCH_CHECKBOX = `${EXTENSION_NAME}-color-match`;
 
 // --- 菜单样式相关常量 ---
@@ -36,6 +34,9 @@ export const CLASS_ITEM = 'quick-reply-item';
 export const CLASS_EMPTY = 'quick-reply-empty';
 export const CLASS_ICON_PREVIEW = 'quick-reply-icon-preview';
 export const CLASS_SETTINGS_ROW = 'quick-reply-settings-row';
+// --- 新增 Class ---
+export const CLASS_WHITELISTED_ITEM = 'whitelisted-qr-item'; // 用于标记白名单中的项
+export const CLASS_WHITELIST_BAR_BUTTON = 'whitelisted-qr-bar-button'; // 用于 qr--bar 中重新创建的按钮
 
 // --- ARIA ---
 export const ARIA_ROLE_MENU = 'menu';
@@ -46,10 +47,17 @@ export const ARIA_ROLE_MENUITEM = 'menuitem';
 export const ID_USAGE_BUTTON = `${EXTENSION_NAME}-usage-button`;
 export const ID_USAGE_PANEL = `${EXTENSION_NAME}-usage-panel`;
 
+// --- 白名单相关常量 (新增) ---
+export const ID_WHITELIST_BUTTON = `${EXTENSION_NAME}-whitelist-button`;
+export const ID_WHITELIST_PANEL = `${EXTENSION_NAME}-whitelist-panel`;
+export const ID_WHITELIST_ITEMS_CONTAINER = `${EXTENSION_NAME}-whitelist-items`;
+export const ID_WHITELIST_CONTAINER_IN_BAR = `${EXTENSION_NAME}-whitelist-bar-container`; // qr--bar 内的容器ID
+
 // --- 默认图标选项 ---
 export const ICON_TYPES = {
     ROCKET: 'rocket',
     COMMENT: 'comment',
+    SPARKLES: 'sparkles', // 确保这里有这个键
     STAR: 'star',
     BOLT: 'bolt',
     FONTAWESOME: 'fontawesome', // <-- 新增 FontAwesome 选项
@@ -81,3 +89,6 @@ export const DEFAULT_MENU_STYLES = {
 
 // --- 默认图标大小 ---
 export const DEFAULT_CUSTOM_ICON_SIZE = 20;
+
+// --- 长按配置 ---
+export const LONG_PRESS_DURATION = 500; // ms
