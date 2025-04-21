@@ -1,9 +1,9 @@
 // index.js - Main Entry Point
 import * as Constants from './constants.js';
-import { sharedState } from './state.js';
-import { createMenuElement } from './ui.js';
+import { sharedState, setMenuVisible } from './state.js'; // 导入 setMenuVisible
+import { createMenuElement, updateMenuVisibilityUI } from './ui.js'; // 导入 updateMenuVisibilityUI
 // 从 settings.js 导入核心功能
-import { createSettingsHtml, loadAndApplySettings as loadAndApplySettingsToPanel, updateIconDisplay } from './settings.js';
+import { createSettingsHtml, loadAndApplySettings as loadAndApplySettingsToPanel, updateIconDisplay, handleWhitelistButtonClick, closeWhitelistPanel, handleWhitelistItemLongPress, renderWhitelistManagementList } from './settings.js'; // 导入白名单相关函数
 import { setupEventListeners, handleQuickReplyClick, updateMenuStylesUI } from './events.js';
 
 // 创建本地设置对象，如果全局对象不存在
@@ -16,10 +16,11 @@ if (!window.extension_settings[Constants.EXTENSION_NAME]) {
         enabled: true,
         iconType: Constants.ICON_TYPES.ROCKET,
         customIconUrl: '',
-        customIconSize: Constants.DEFAULT_CUSTOM_ICON_SIZE, 
-        faIconCode: '',                                  
+        customIconSize: Constants.DEFAULT_CUSTOM_ICON_SIZE,
+        faIconCode: '',
         matchButtonColors: true,
-        menuStyles: JSON.parse(JSON.stringify(Constants.DEFAULT_MENU_STYLES))
+        menuStyles: JSON.parse(JSON.stringify(Constants.DEFAULT_MENU_STYLES)),
+        whitelistedReplies: [] // <-- 新增白名单数组
     };
 }
 
@@ -30,112 +31,131 @@ export const extension_settings = window.extension_settings;
  * Injects the rocket button next to the send button
  */
 function injectRocketButton() {
-    const sendButton = document.getElementById('send_but'); // 使用原生 JS 获取
+    const sendButton = document.getElementById('send_but');
     if (!sendButton) {
         console.error(`[${Constants.EXTENSION_NAME}] Could not find send button (#send_but)`);
-        return null; // Return null if send button isn't found
+        return null;
     }
-
-    // 检查按钮是否已存在
     let rocketButton = document.getElementById(Constants.ID_ROCKET_BUTTON);
-    if (rocketButton) {
-        console.log(`[${Constants.EXTENSION_NAME}] Rocket button already exists.`);
-        return rocketButton;
-    }
+    if (rocketButton) return rocketButton;
 
-    // 创建按钮元素
     rocketButton = document.createElement('div');
     rocketButton.id = Constants.ID_ROCKET_BUTTON;
-    // 初始类名在 updateIconDisplay 中设置
-    // rocketButton.className = 'interactable secondary-button'; // Initial classes set by updateIconDisplay
-    rocketButton.title = "快速回复菜单";
+    rocketButton.title = "快速回复菜单 (长按项加入白名单)"; // 更新 title
     rocketButton.setAttribute('aria-haspopup', 'true');
     rocketButton.setAttribute('aria-expanded', 'false');
     rocketButton.setAttribute('aria-controls', Constants.ID_MENU);
-
-    // Insert the button before the send button
     sendButton.parentNode.insertBefore(rocketButton, sendButton);
-
     console.log(`[${Constants.EXTENSION_NAME}] Rocket button injected.`);
-    return rocketButton; // Return the reference
+    return rocketButton;
 }
-
-// 移除此文件中重复的 updateIconDisplay 函数，使用 settings.js 导出的版本
 
 /**
- * 更新图标预览 (现在也处理 FontAwesome 和自定义大小)
+ * 在 qr--bar 中注入用于放置白名单按钮的容器
  */
-function updateIconPreview(iconType) {
-    const previewContainer = document.querySelector(`.${Constants.CLASS_ICON_PREVIEW}`);
-    if (!previewContainer) return;
-
-    // 清除内容和样式
-    previewContainer.innerHTML = '';
-    previewContainer.style.backgroundImage = '';
-    previewContainer.style.backgroundSize = '';
-    previewContainer.style.backgroundPosition = '';
-    previewContainer.style.backgroundRepeat = '';
-    previewContainer.style.fontSize = ''; // 清除可能的字体大小设置
-
-    const settings = window.extension_settings[Constants.EXTENSION_NAME];
-    const customIconSize = settings.customIconSize || Constants.DEFAULT_CUSTOM_ICON_SIZE;
-
-    if (iconType === Constants.ICON_TYPES.CUSTOM) {
-        const customContent = settings.customIconUrl?.trim() || '';
-        const sizeStyle = `${customIconSize}px ${customIconSize}px`; // 使用设置的大小
-
-        if (!customContent) {
-            previewContainer.innerHTML = '<span>(无预览)</span>';
-            return;
-        }
-
-        // 使用CSS背景图像显示
-        if (customContent.startsWith('<svg') && customContent.includes('</svg>')) {
-            const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(customContent);
-            previewContainer.style.backgroundImage = `url('${svgDataUrl}')`;
-            previewContainer.style.backgroundSize = sizeStyle;
-            previewContainer.style.backgroundPosition = 'center';
-            previewContainer.style.backgroundRepeat = 'no-repeat';
-        }
-        else if (customContent.startsWith('data:') || customContent.startsWith('http') || /\.(png|jpg|jpeg|gif|svg|webp)$/i.test(customContent)) {
-            previewContainer.style.backgroundImage = `url('${customContent}')`;
-            previewContainer.style.backgroundSize = sizeStyle;
-            previewContainer.style.backgroundPosition = 'center';
-            previewContainer.style.backgroundRepeat = 'no-repeat';
-        }
-         else if (customContent.includes('base64,')) {
-             let imgUrl = customContent;
-             if (!customContent.startsWith('data:')) {
-                 const possibleType = customContent.substring(0, 10).includes('PNG') ? 'image/png' : 'image/jpeg';
-                 imgUrl = `data:${possibleType};base64,` + customContent.split('base64,')[1];
-             }
-             previewContainer.style.backgroundImage = `url('${imgUrl}')`;
-             previewContainer.style.backgroundSize = sizeStyle;
-             previewContainer.style.backgroundPosition = 'center';
-             previewContainer.style.backgroundRepeat = 'no-repeat';
-        } else {
-            previewContainer.innerHTML = '<span>(格式不支持)</span>';
-        }
-    } else if (iconType === Constants.ICON_TYPES.FONTAWESOME) { // <-- 新增处理 FA
-        const faIconCode = settings.faIconCode?.trim() || '';
-        if (faIconCode) {
-            previewContainer.innerHTML = faIconCode;
-            // 可以稍微调整预览容器的字体大小，使其看起来合适
-            previewContainer.style.fontSize = '24px'; // 例如
-        } else {
-            previewContainer.innerHTML = '<span>(无代码)</span>';
-        }
-    } else {
-        // 处理预设的 FontAwesome 图标
-        const iconClass = Constants.ICON_CLASS_MAP[iconType] || Constants.ICON_CLASS_MAP[Constants.ICON_TYPES.ROCKET];
-        if (iconClass) {
-            previewContainer.innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
-            previewContainer.style.fontSize = '24px'; // 示例大小
-        } else {
-             previewContainer.innerHTML = '<span>(无预览)</span>';
-        }
+function injectWhitelistContainer() {
+    const qrBar = document.getElementById('qr--bar');
+    if (!qrBar) {
+        console.warn(`[${Constants.EXTENSION_NAME}] Could not find #qr--bar to inject whitelist container.`);
+        return null;
     }
+
+    let whitelistContainer = document.getElementById(Constants.ID_WHITELIST_CONTAINER_IN_BAR);
+    if (whitelistContainer) {
+        return whitelistContainer; // Already exists
+    }
+
+    whitelistContainer = document.createElement('div');
+    whitelistContainer.id = Constants.ID_WHITELIST_CONTAINER_IN_BAR;
+    whitelistContainer.className = 'qr--buttons'; // 模拟原始 Quick Reply v2 的容器类
+    // 将其添加到 qr--bar 的开头或结尾，取决于偏好
+    qrBar.insertBefore(whitelistContainer, qrBar.firstChild); // 添加到开头
+    console.log(`[${Constants.EXTENSION_NAME}] Whitelist container injected into #qr--bar.`);
+    return whitelistContainer;
 }
+
+
+/**
+ * 更新 qr--bar 中显示的白名单快捷回复按钮
+ */
+export function updateWhitelistedRepliesInBar() {
+    const container = document.getElementById(Constants.ID_WHITELIST_CONTAINER_IN_BAR);
+    if (!container) {
+        console.error(`[${Constants.EXTENSION_NAME}] Whitelist container in bar not found.`);
+        return;
+    }
+    container.innerHTML = ''; // 清空现有按钮
+
+    const settings = extension_settings[Constants.EXTENSION_NAME];
+    const whitelisted = settings.whitelistedReplies || [];
+
+    if (whitelisted.length === 0) {
+        container.style.display = 'none'; // 如果没有白名单项，隐藏容器
+        return;
+    }
+
+    container.style.display = 'flex'; // 确保容器可见
+
+    if (!window.quickReplyApi || !window.quickReplyApi.settings) {
+        console.warn(`[${Constants.EXTENSION_NAME}] Quick Reply API or settings not available to fetch original button details.`);
+        return;
+    }
+
+    const qrApi = window.quickReplyApi;
+    const allRepliesMap = new Map(); // 用于快速查找原始回复数据
+
+    // 预处理所有回复以便快速查找 (优化)
+    const processSetList = (setList) => {
+        setList?.forEach(setLink => {
+            setLink?.set?.qrList?.forEach(qr => {
+                if (qr && qr.label && setLink.set?.name) {
+                    const key = `${setLink.set.name}::${qr.label}`; // 使用 setName::label 作为 Key
+                    if (!allRepliesMap.has(key)) {
+                        allRepliesMap.set(key, qr);
+                    }
+                }
+            });
+        });
+    };
+
+    if (qrApi.settings?.chatConfig?.setList) {
+        processSetList(qrApi.settings.chatConfig.setList);
+    }
+    if (qrApi.settings?.config?.setList) {
+        processSetList(qrApi.settings.config.setList);
+    }
+
+    whitelisted.forEach(item => {
+        const key = `${item.setName}::${item.label}`;
+        const originalQrData = allRepliesMap.get(key); // 尝试找到原始数据
+
+        const button = document.createElement('div');
+        button.className = `${Constants.CLASS_WHITELIST_BAR_BUTTON} qr--button`; // 添加自定义类和模拟原始类
+        button.dataset.setName = item.setName;
+        button.dataset.label = item.label;
+        button.textContent = item.label;
+        button.title = originalQrData?.message || `触发: ${item.setName} > ${item.label}`; // 使用原始消息或默认提示
+
+        // **重要：添加点击事件监听器，调用原始 API**
+        button.addEventListener('click', async () => {
+            if (window.quickReplyApi && window.quickReplyApi.executeQuickReply) {
+                try {
+                    console.log(`[${Constants.EXTENSION_NAME}] Triggering whitelisted reply from bar: "${item.setName}.${item.label}"`);
+                    await window.quickReplyApi.executeQuickReply(item.setName, item.label);
+                } catch (error) {
+                    console.error(`[${Constants.EXTENSION_NAME}] Failed to execute whitelisted reply "${item.setName}.${item.label}" from bar:`, error);
+                }
+            } else {
+                console.error(`[${Constants.EXTENSION_NAME}] Quick Reply API executeQuickReply not found!`);
+            }
+        });
+
+        container.appendChild(button);
+    });
+}
+
+
+// 移除此文件中重复的 updateIconPreview 函数，使用 settings.js 导出的版本
 
 /**
  * Initializes the plugin: creates UI, sets up listeners, loads settings.
@@ -144,35 +164,30 @@ function initializePlugin() {
     try {
         console.log(`[${Constants.EXTENSION_NAME}] Initializing...`);
 
-        // Create and inject the rocket button
+        // 1. 注入白名单容器到 qr--bar
+        const whitelistContainerInBar = injectWhitelistContainer();
+
+        // 2. 创建和注入火箭按钮
         const rocketButton = injectRocketButton();
         if (!rocketButton) {
              console.error(`[${Constants.EXTENSION_NAME}] Initialization failed: Rocket button could not be injected.`);
-             return; // Stop initialization if button injection fails
+             return;
         }
 
-        // Create menu element
+        // 3. 创建菜单元素
         const menu = createMenuElement();
 
-        // Store references in shared state
+        // 4. Store references in shared state
         sharedState.domElements.rocketButton = rocketButton;
         sharedState.domElements.menu = menu;
         sharedState.domElements.chatItemsContainer = menu.querySelector(`#${Constants.ID_CHAT_ITEMS}`);
         sharedState.domElements.globalItemsContainer = menu.querySelector(`#${Constants.ID_GLOBAL_ITEMS}`);
-        // 获取设置面板中的元素引用 (在 settings.js 中加载后才能获取)
-        // 这些将在 loadAndApplySettings 或 setupEventListeners 中获取并使用
-        // sharedState.domElements.settingsDropdown = document.getElementById(Constants.ID_SETTINGS_ENABLED_DROPDOWN);
-        // sharedState.domElements.iconTypeDropdown = document.getElementById(Constants.ID_ICON_TYPE_DROPDOWN);
-        // ... 其他设置元素 ...
-         sharedState.domElements.customIconUrl = document.getElementById(Constants.ID_CUSTOM_ICON_URL);
-         sharedState.domElements.customIconSizeInput = document.getElementById(Constants.ID_CUSTOM_ICON_SIZE_INPUT); // <-- 新增
-         sharedState.domElements.faIconCodeInput = document.getElementById(Constants.ID_FA_ICON_CODE_INPUT);       // <-- 新增
-         sharedState.domElements.colorMatchCheckbox = document.getElementById(Constants.ID_COLOR_MATCH_CHECKBOX);
+        // ... 其他设置元素引用在 setupEventListeners 或 loadAndApplySettingsToPanel 中获取 ...
+        sharedState.domElements.whitelistContainerInBar = whitelistContainerInBar; // Store ref
 
-
-        // 创建全局对象暴露事件处理函数和保存函数
+        // 5. 创建全局对象暴露事件处理函数和保存函数
         window.quickReplyMenu = {
-            handleQuickReplyClick,
+            handleQuickReplyClick, // 从 events.js 导入
             saveSettings: function() {
                 console.log(`[${Constants.EXTENSION_NAME}] Attempting to save settings via window.quickReplyMenu.saveSettings...`);
                 // 从DOM元素获取最新值
@@ -180,43 +195,38 @@ function initializePlugin() {
                 const enabledDropdown = document.getElementById(Constants.ID_SETTINGS_ENABLED_DROPDOWN);
                 const iconTypeDropdown = document.getElementById(Constants.ID_ICON_TYPE_DROPDOWN);
                 const customIconUrl = document.getElementById(Constants.ID_CUSTOM_ICON_URL);
-                const customIconSizeInput = document.getElementById(Constants.ID_CUSTOM_ICON_SIZE_INPUT); // <-- 新增
-                const faIconCodeInput = document.getElementById(Constants.ID_FA_ICON_CODE_INPUT);       // <-- 新增
+                const customIconSizeInput = document.getElementById(Constants.ID_CUSTOM_ICON_SIZE_INPUT);
+                const faIconCodeInput = document.getElementById(Constants.ID_FA_ICON_CODE_INPUT);
                 const colorMatchCheckbox = document.getElementById(Constants.ID_COLOR_MATCH_CHECKBOX);
 
+                // 获取并更新基本设置
                 if (enabledDropdown) settings.enabled = enabledDropdown.value === 'true';
                 if (iconTypeDropdown) settings.iconType = iconTypeDropdown.value;
                 if (customIconUrl) settings.customIconUrl = customIconUrl.value;
-                if (customIconSizeInput) settings.customIconSize = parseInt(customIconSizeInput.value, 10) || Constants.DEFAULT_CUSTOM_ICON_SIZE; // <-- 新增
-                if (faIconCodeInput) settings.faIconCode = faIconCodeInput.value;                         // <-- 新增
+                if (customIconSizeInput) settings.customIconSize = parseInt(customIconSizeInput.value, 10) || Constants.DEFAULT_CUSTOM_ICON_SIZE;
+                if (faIconCodeInput) settings.faIconCode = faIconCodeInput.value;
                 if (colorMatchCheckbox) settings.matchButtonColors = colorMatchCheckbox.checked;
 
-                // 更新图标显示以反映最新设置
-                updateIconDisplay();
+                // 注意: settings.whitelistedReplies 由长按事件直接修改，这里不需要从 DOM 读取
 
-                // 更新图标预览 (可选，如果设置面板可见)
-                if (document.getElementById(Constants.ID_SETTINGS_CONTAINER)?.offsetParent !== null) {
-                     updateIconPreview(settings.iconType);
-                }
+                // 更新图标显示
+                updateIconDisplay(); // settings.js
 
-                // 更新菜单样式 (如果样式被修改过)
-                if (typeof updateMenuStylesUI === 'function' && settings.menuStyles) {
-                    // 检查样式是否真的改变了，避免不必要的更新
-                    // let stylesChanged = checkIfStylesChanged(); // (需要实现比较逻辑)
-                    // if (stylesChanged) updateMenuStylesUI();
-                    updateMenuStylesUI(); // 简单起见，每次保存都更新
-                }
+                // 更新菜单样式
+                updateMenuStylesUI(); // events.js
 
-                // 尝试保存到 localStorage 作为备份
+                // **重要：更新 qr--bar 中的白名单按钮**
+                updateWhitelistedRepliesInBar(); // index.js
+
+                // 保存逻辑 (localStorage / context API)
                 let savedToLocalStorage = false;
                 try {
-                    localStorage.setItem('QRA_settings', JSON.stringify(settings));
+                    localStorage.setItem('QRA_settings', JSON.stringify(settings)); // 保存包含白名单的完整设置
                     savedToLocalStorage = true;
                 } catch(e) {
                     console.error(`[${Constants.EXTENSION_NAME}] 保存到localStorage失败:`, e);
                 }
 
-                // 尝试使用 context API 保存
                 let savedToContext = false;
                 if (typeof context !== 'undefined' && context.saveExtensionSettings) {
                     try {
@@ -230,51 +240,75 @@ function initializePlugin() {
                     console.warn(`[${Constants.EXTENSION_NAME}] context.saveExtensionSettings 不可用`);
                 }
 
-                const success = savedToContext || savedToLocalStorage; // 至少一种保存成功
+                const success = savedToContext || savedToLocalStorage;
 
-                // 显示保存成功的反馈
+                // 显示保存反馈
                 const saveStatus = document.getElementById('qr-save-status');
-                 if (saveStatus) {
-                     if (success) {
-                         saveStatus.textContent = '✓ 设置已保存';
-                         saveStatus.style.color = '#4caf50';
-                     } else {
-                         saveStatus.textContent = '✗ 保存失败';
-                          saveStatus.style.color = '#f44336';
-                     }
-                     setTimeout(() => { saveStatus.textContent = ''; }, 2000);
-                 }
+                if (saveStatus) {
+                    saveStatus.textContent = success ? '✓ 设置已保存' : '✗ 保存失败';
+                    saveStatus.style.color = success ? '#4caf50' : '#f44336';
+                    setTimeout(() => { saveStatus.textContent = ''; }, 2000);
+                }
 
-                 // 更新保存按钮视觉反馈
-                 const saveButton = document.getElementById('qr-save-settings');
-                 if (saveButton && success) {
-                     const originalText = '<i class="fa-solid fa-floppy-disk"></i> 保存设置'; // 原始 HTML
-                     const originalBg = saveButton.style.backgroundColor;
-                     saveButton.innerHTML = '<i class="fa-solid fa-check"></i> 已保存';
-                     saveButton.style.backgroundColor = '#4caf50';
-                     setTimeout(() => {
-                         saveButton.innerHTML = originalText;
-                         saveButton.style.backgroundColor = originalBg; // 恢复原背景色或置空让 CSS 控制
-                     }, 2000);
-                 }
+                // 更新保存按钮视觉反馈
+                const saveButton = document.getElementById('qr-save-settings');
+                if (saveButton && success) {
+                    const originalText = '<i class="fa-solid fa-floppy-disk"></i> 保存设置';
+                    saveButton.innerHTML = '<i class="fa-solid fa-check"></i> 已保存';
+                    saveButton.style.backgroundColor = '#4caf50';
+                    setTimeout(() => {
+                        saveButton.innerHTML = originalText;
+                        saveButton.style.backgroundColor = '';
+                    }, 2000);
+                }
 
-                return success; // 返回保存是否成功
+                return success;
             },
-            // 暴露 updateIconPreview 供设置面板使用可能更好
-            updateIconPreview: updateIconPreview
+            // 暴露其他需要的函数
+            updateIconPreview: window.quickReplyMenu ? window.quickReplyMenu.updateIconPreview : null, // 从 settings.js 导入并暴露
+            // 暴露白名单相关函数，供 UI 模块的长按事件调用
+            addToWhitelist: function(setName, label) {
+                const settings = extension_settings[Constants.EXTENSION_NAME];
+                if (!settings.whitelistedReplies) settings.whitelistedReplies = [];
+                // 检查是否已存在
+                const exists = settings.whitelistedReplies.some(item => item.setName === setName && item.label === label);
+                if (!exists) {
+                    settings.whitelistedReplies.push({ setName, label });
+                    console.log(`[${Constants.EXTENSION_NAME}] Added to whitelist: ${setName}.${label}`);
+                    this.saveSettings(); // 保存并更新 qr--bar
+                    return true; // 表示成功添加
+                }
+                return false; // 表示已存在
+            },
+             removeFromWhitelist: function(setName, label) {
+                 const settings = extension_settings[Constants.EXTENSION_NAME];
+                 const initialLength = settings.whitelistedReplies?.length ?? 0;
+                 if (initialLength > 0) {
+                     settings.whitelistedReplies = settings.whitelistedReplies.filter(item => !(item.setName === setName && item.label === label));
+                     if (settings.whitelistedReplies.length < initialLength) {
+                         console.log(`[${Constants.EXTENSION_NAME}] Removed from whitelist: ${setName}.${label}`);
+                         this.saveSettings(); // 保存并更新 qr--bar
+                         // 更新白名单管理面板 (如果可见)
+                         if (document.getElementById(Constants.ID_WHITELIST_PANEL)?.style.display === 'block') {
+                             renderWhitelistManagementList(); // 重新渲染列表
+                         }
+                         return true; // 表示成功移除
+                     }
+                 }
+                 return false; // 表示未找到或移除失败
+             },
+             // 暴露白名单按钮更新函数，可能在某些场景下需要外部调用
+             updateWhitelistedRepliesInBar: updateWhitelistedRepliesInBar
         };
 
-        // Append menu to the body
+        // 6. Append menu to the body
         document.body.appendChild(menu);
 
-        // Load settings and apply initial UI state (like button visibility and icon)
-        loadAndApplyInitialSettings(); // 使用下面的新函数
+        // 7. Load settings and apply initial UI state
+        loadAndApplyInitialSettings(); // 这会调用 updateIconDisplay 和 updateWhitelistedRepliesInBar
 
-        // Setup event listeners for the button, menu, etc.
-        setupEventListeners(); // events.js
-
-        // 设置文件上传监听器 (现在在 settings.js 中处理，确保 setupEventListeners 调用了它)
-        // setupFileUploadListener(); // 不再需要在这里调用
+        // 8. Setup event listeners
+        setupEventListeners(); // events.js (确保它会设置白名单面板的监听器)
 
         console.log(`[${Constants.EXTENSION_NAME}] Initialization complete.`);
     } catch (err) {
@@ -282,23 +316,22 @@ function initializePlugin() {
     }
 }
 
-// // 移除旧的 setupFileUploadListener 函数
 
 /**
- * 加载初始设置并应用到插件状态和按钮显示
- * (与 settings.js 中的 loadAndApplySettingsToPanel 不同，这个是应用到插件运行状态)
+ * 加载初始设置并应用到插件状态和UI
  */
 function loadAndApplyInitialSettings() {
     const settings = window.extension_settings[Constants.EXTENSION_NAME];
 
-    // 确保默认值已设置 (防御性编程)
+    // 确保默认值已设置
     settings.enabled = settings.enabled !== false;
     settings.iconType = settings.iconType || Constants.ICON_TYPES.ROCKET;
     settings.customIconUrl = settings.customIconUrl || '';
-    settings.customIconSize = settings.customIconSize || Constants.DEFAULT_CUSTOM_ICON_SIZE; // <-- 新增
-    settings.faIconCode = settings.faIconCode || '';                                  // <-- 新增
+    settings.customIconSize = settings.customIconSize || Constants.DEFAULT_CUSTOM_ICON_SIZE;
+    settings.faIconCode = settings.faIconCode || '';
     settings.matchButtonColors = settings.matchButtonColors !== false;
     settings.menuStyles = settings.menuStyles || JSON.parse(JSON.stringify(Constants.DEFAULT_MENU_STYLES));
+    settings.whitelistedReplies = settings.whitelistedReplies || []; // <-- 确保白名单数组存在
 
     // 更新body类控制显示状态
     document.body.classList.remove('qra-enabled', 'qra-disabled');
@@ -309,13 +342,14 @@ function loadAndApplyInitialSettings() {
         sharedState.domElements.rocketButton.style.display = settings.enabled ? 'flex' : 'none';
     }
 
-    // 更新初始图标显示 (调用 settings.js 导出的函数)
-    updateIconDisplay();
+    // 更新初始图标显示
+    updateIconDisplay(); // settings.js
 
     // 应用初始菜单样式设置
-    if (typeof updateMenuStylesUI === 'function') {
-        updateMenuStylesUI();
-    }
+    updateMenuStylesUI(); // events.js
+
+    // **重要：更新 qr--bar 中的白名单按钮**
+    updateWhitelistedRepliesInBar(); // index.js
 
     console.log(`[${Constants.EXTENSION_NAME}] Initial settings applied.`);
 }
@@ -335,9 +369,13 @@ function loadSettingsFromLocalStorage() {
         const savedSettings = localStorage.getItem('QRA_settings');
         if (savedSettings) {
             const parsedSettings = JSON.parse(savedSettings);
-            // 将保存的设置合并到当前设置 (确保新字段也能被加载)
             const currentSettings = extension_settings[Constants.EXTENSION_NAME];
-            Object.assign(currentSettings, parsedSettings); // 合并，localStorage中的值会覆盖默认值
+            // 合并，确保新字段（如whitelistedReplies）也能被加载
+            Object.assign(currentSettings, parsedSettings);
+            // 再次确保默认值，以防localStorage中缺少某些字段
+             currentSettings.whitelistedReplies = currentSettings.whitelistedReplies || [];
+             currentSettings.menuStyles = currentSettings.menuStyles || JSON.parse(JSON.stringify(Constants.DEFAULT_MENU_STYLES));
+             // ... 其他可能需要默认值的字段 ...
             console.log(`[${Constants.EXTENSION_NAME}] 从localStorage加载了设置:`, currentSettings);
             return true;
         }
@@ -350,7 +388,7 @@ function loadSettingsFromLocalStorage() {
 // 在 onReady 回调中
 onReady(() => {
     try {
-        // 1. 尝试从localStorage加载设置 (会更新 window.extension_settings)
+        // 1. 尝试从localStorage加载设置
         loadSettingsFromLocalStorage();
 
         // 2. 确保设置面板容器存在
@@ -359,25 +397,26 @@ onReady(() => {
             console.warn("[Quick Reply Menu] #extensions_settings not found, creating dummy container.");
             settingsContainer = document.createElement('div');
             settingsContainer.id = 'extensions_settings';
-            settingsContainer.style.display = 'none'; // 隐藏
+            settingsContainer.style.display = 'none';
             document.body.appendChild(settingsContainer);
         }
 
         // 3. 添加设置面板HTML内容 (使用 settings.js 的函数)
-        // 注意：innerHTML += 可能导致事件监听器丢失，最好找到特定扩展的容器并替换其内容
-        // 假设每个扩展都有自己的 settings div，例如 <div id="quick-reply-menu-settings">
-        const settingsHtml = createSettingsHtml(); // 来自 settings.js
-        // 将HTML插入到 settingsContainer 中。如果其他扩展也用 innerHTML +=，可能会有问题。
-        // 最好是找到一个专门为此扩展准备的容器。
-        // 临时的简单方法：
-         settingsContainer.insertAdjacentHTML('beforeend', settingsHtml);
+        const settingsHtml = createSettingsHtml(); // settings.js (应包含白名单面板HTML)
+        // 尝试找到或创建特定扩展的容器
+        let extensionSettingsDiv = document.getElementById(`${Constants.EXTENSION_NAME}-settings-wrapper`);
+        if (!extensionSettingsDiv) {
+            extensionSettingsDiv = document.createElement('div');
+            extensionSettingsDiv.id = `${Constants.EXTENSION_NAME}-settings-wrapper`;
+            settingsContainer.appendChild(extensionSettingsDiv);
+        }
+        extensionSettingsDiv.innerHTML = settingsHtml; // 替换内容，避免 innerHTML+= 的问题
 
+        // 4. 初始化插件 (创建按钮、菜单、注入白名单容器等)
+        initializePlugin(); // 调用上面修改过的函数
 
-        // 4. 初始化插件 (创建按钮、菜单等)
-        initializePlugin();
-
-        // 5. 加载设置到设置面板UI元素 (调用 settings.js 的函数)
-        loadAndApplySettingsToPanel(); // 加载设置到面板中的控件
+        // 5. 加载设置到设置面板UI元素
+        loadAndApplySettingsToPanel(); // settings.js (加载到面板控件)
 
     } catch (err) {
         console.error(`[${Constants.EXTENSION_NAME}] 启动失败:`, err);
